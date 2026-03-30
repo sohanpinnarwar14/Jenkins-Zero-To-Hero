@@ -1,5 +1,5 @@
 pipeline {
-  agent any   // ✅ run on Jenkins machine
+  agent any
 
   stages {
 
@@ -41,12 +41,14 @@ pipeline {
         DOCKER_IMAGE = "sohan2888/ultimate-ci-cd-pipeline:${BUILD_NUMBER}"
       }
       steps {
-        sh '''
-        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-        docker build -t $DOCKER_IMAGE .
-        docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
-        docker push $DOCKER_IMAGE
-        '''
+        withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+          sh '''
+          cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+          docker build -t $DOCKER_IMAGE .
+          echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin
+          docker push $DOCKER_IMAGE
+          '''
+        }
       }
     }
 
