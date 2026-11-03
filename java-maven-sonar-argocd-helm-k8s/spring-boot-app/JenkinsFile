@@ -3,11 +3,14 @@ pipeline {
 
   stages {
 
-    stage('Checkout') {
-      steps {
-        git branch: 'main', url: 'https://github.com/sohanpinnarwar14/Jenkins-Zero-To-Hero.git'
-      }
+stage('Checkout') {
+    agent any
+
+    steps {
+        git branch: 'main',
+            url: 'https://github.com/sohanpinnarwar14/Jenkins-Zero-To-Hero.git'
     }
+}
 
     stage('Build and Test') {
       agent {
