@@ -1,88 +1,128 @@
+
 pipeline {
-  agent none
-
-  stages {
-
-stage('Checkout') {
     agent any
 
-    steps {
-        git branch: 'main',
-            url: 'https://github.com/sohanpinnarwar14/Jenkins-Zero-To-Hero.git'
-    }
-}
+    stages {
 
-    stage('Build and Test') {
-      agent {
-        docker {
-          image 'maven:3.9.9-eclipse-temurin-21'
+        // 1. CHECKOUT SOURCE CODE
+        stage('Checkout') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/sohanpinnarwar14/Jenkins-Zero-To-Hero.git'
+            }
         }
-      }
-      steps {
-       sh '''
-  mkdir -p "$WORKSPACE/.m2/repository"
-  cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
-  mvn -Dmaven.repo.local="$WORKSPACE/.m2/repository" clean package
-'''
-      }
-    }
 
-    stage('Static Code Analysis') {
-      agent {
-        docker {
-          image 'maven:3.9.9-eclipse-temurin-21'
+        // 2. BUILD AND TEST USING MAVEN
+        stage('Build and Test') {
+            agent {
+                docker {
+                    image 'maven:3.9.9-eclipse-temurin-21'
+                    reuseNode true
+                }
+            }
+
+            steps {
+                sh '''
+                    mkdir -p "$WORKSPACE/.m2/repository"
+
+                    cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+                    mvn -Dmaven.repo.local="$WORKSPACE/.m2/repository" clean package
+                '''
+            }
         }
-      }
-      environment {
-        SONAR_URL = "http://16.178.131.176:9000"
-      }
-      steps {
-        withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_AUTH_TOKEN')]) {
-         sh '''
-cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
 
-mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
--Dsonar.token=$SONAR_AUTH_TOKEN \
--Dsonar.host.url=$SONAR_URL
-'''
+        // 3. SONARQUBE STATIC CODE ANALYSIS
+        stage('Static Code Analysis') {
+            agent {
+                docker {
+                    image 'maven:3.9.9-eclipse-temurin-21'
+                    reuseNode true
+                }
+            }
+
+            environment {
+                SONAR_URL = 'http://16.178.131.176:9000'
+            }
+
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'sonarqube',
+                        variable: 'SONAR_AUTH_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        mkdir -p "$WORKSPACE/.m2/repository"
+
+                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+                        mvn -Dmaven.repo.local="$WORKSPACE/.m2/repository" \
+                        org.sonarsource.scanner.maven:sonar-maven-plugin:3.11.0.3922:sonar \
+                        -Dsonar.token=$SONAR_AUTH_TOKEN \
+                        -Dsonar.host.url=$SONAR_URL
+                    '''
+                }
+            }
         }
-      }
-    }
 
-    stage('Build and Push Docker Image') {
-      environment {
-        DOCKER_IMAGE = "sohan2888/ultimate-ci-cd-pipeline:${BUILD_NUMBER}"
-      }
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'docker-cred', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
-sh '''
-  cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+        // 4. BUILD AND PUSH DOCKER IMAGE
+        stage('Build and Push Docker Image') {
 
-  mvn -Dmaven.repo.local="$WORKSPACE/.m2/repository" sonar:sonar \
-    -Dsonar.login=$SONAR_AUTH_TOKEN \
-    -Dsonar.host.url=${SONAR_URL}
-'''
+            environment {
+                DOCKER_IMAGE = "sohan2888/ultimate-ci-cd-pipeline:${BUILD_NUMBER}"
+            }
+
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'docker-cred',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+                    sh '''
+                        cd java-maven-sonar-argocd-helm-k8s/spring-boot-app
+
+                        docker build -t "$DOCKER_IMAGE" .
+
+                        echo "$DOCKER_PASSWORD" | docker login \
+                        -u "$DOCKER_USERNAME" --password-stdin
+
+                        docker push "$DOCKER_IMAGE"
+
+                        docker logout
+                    '''
+                }
+            }
         }
-      }
-    }
 
-    stage('Update Deployment File') {
-      environment {
-        GIT_REPO_NAME = "Jenkins-Zero-To-Hero"
-        GIT_USER_NAME = "sohanpinnarwar14"
-      }
-      steps {
-        withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
-          sh '''
-            git config user.email "mr.sohanpinnarwar@gmail.com"
-            git config user.name "Sohan Pinnarwar"
-            sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
-            git add .
-            git commit -m "Update image tag ${BUILD_NUMBER}"
-            git push https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:main
-          '''
+        // 5. UPDATE KUBERNETES DEPLOYMENT FILE
+        stage('Update Deployment File') {
+
+            environment {
+                GIT_REPO_NAME = 'Jenkins-Zero-To-Hero'
+                GIT_USER_NAME = 'sohanpinnarwar14'
+            }
+
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'github',
+                        variable: 'GITHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        git config user.email "mr.sohanpinnar@gmail.com"
+                        git config user.name "Sohan Pinnarwar"
+
+                        sed -i "s/replaceImageTag/${BUILD_NUMBER}/g" \
+                        java-maven-sonar-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+
+                        git add java-maven-argocd-helm-k8s/spring-boot-app-manifests/deployment.yml
+                    '''
+                }
+            }
         }
-      }
     }
-  }
 }
